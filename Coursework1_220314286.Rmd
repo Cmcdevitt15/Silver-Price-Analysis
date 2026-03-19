@@ -1,0 +1,158 @@
+---
+title: "MTH6139 Time Series" 
+subtitle: "Coursework 1 -- A Predictive Analysis of Silver Prices" 
+author: "Charles McDevitt" 
+date: "March 17, Spring Term 2026" 
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: journal 
+    highlight: espresso
+---
+
+```{r setup_logo, echo=FALSE, message=FALSE, warning=FALSE}
+# This code displays the QMUL logo. 
+# Ensure you have an 'images' folder containing 'QMlogo.png'
+htmltools::img(src = knitr::image_uri("images/QMlogo.png"),
+               alt = 'logo',
+               style = 'position:absolute; top:0; right:0; padding:10px; width:20%;')
+```
+
+# Section 1: Introduction to Silver Price Forecasting
+Silver is a unique asset, functioning as both a safe-haven investment and a critical industrial metal. In this project, I utilise Meta’s Prophet library to analyse the historical price of the iShares Silver Trust (SLV). By examining the price action over the last few years, we can attempt to separate daily market "noise" from the broader trends and seasonal cycles. However, I also show the volatility of this asset and despite the recent upward trend up to January 2026, the sell off of silver for various reasons including the Iran war, surge in oil prices and the results from the recent Fed Meeting.
+
+## 1.1 Methodology
+I am pulling live market data via the quantmod library. The primary tool for prediction is Prophet, which uses an additive model where non-linear trends are fit with yearly, weekly, and daily seasonality. This approach is highly effective for financial data, which often contains complex cyclical patterns.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Loading core libraries for data manipulation and forecasting
+library(prophet)
+library(quantmod)
+library(dplyr)
+library(ggplot2)
+```
+
+# Section 2: Data Acquisition and Preparation
+## 2.1 Fetching Financial Data
+To get an accurate representation of the silver market, I have retrieved data for the iShares Silver Trust (SLV). I am looking at data from 2021 to the present to capture the post-pandemic market volatility and current inflationary trends.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Downloading Silver ETF data from Yahoo Finance
+getSymbols("SLV", from = "2021-01-01", auto.assign = TRUE)
+
+# Converting the financial xts object into a Prophet-compliant dataframe
+SilverPriceData <- data.frame(
+  ds = index(SLV), 
+  y = as.numeric(Cl(SLV)) # Closing Price
+)
+
+# Previewing the prepared data
+knitr::kable(head(SilverPriceData), caption = "First 6 entries of the Silver Price Dataset")
+```
+
+## 2.2 Data Characteristics
+Unlike atmospheric or weather data, financial data only exists on trading days. One of the reasons I chose the Prophet library is its ability to handle these gaps (weekends and bank holidays) automatically without requiring manual interpolation or complex data cleaning.
+
+
+# Section 3: Forecasting with Meta Prophet
+## 3.1 Model Implementation
+Now, I initialize the Prophet model. This process involves the model detecting "changepoints"—specific dates where the price trend significantly shifted due to external market events.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Fitting the model to our prepared silver data
+SilverMarketModel <- prophet(SilverPriceData)
+
+# Generating a timeline for the next year (365 days)
+FutureDatesTimeline <- make_future_dataframe(SilverMarketModel, periods = 365)
+
+# Predicting future values based on the fitted model
+SilverPriceForecast <- predict(SilverMarketModel, FutureDatesTimeline)
+```
+
+## 3.2 Visualising the Trend
+The plot below illustrates the primary forecast. The black dots represent the actual daily closing prices, the blue line is the model's estimate, and the shaded blue area represents the uncertainty interval.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+plot(SilverMarketModel, SilverPriceForecast) + 
+  theme_minimal() + 
+  labs(title = "Forecasted Silver Prices (Next 12 Months)",
+       x = "Year", 
+       y = "Price in USD")
+```
+
+# Section 4: Decomposing Market Cycles
+## 4.1 Trend and Seasonality
+By "decomposing" the series, we can isolate the individual components of the silver price. This allows us to see if silver consistently peaks at certain times of the year or on certain days of the week.
+```{r market_cycles, echo=FALSE, message=FALSE, warning=FALSE}
+prophet_plot_components(SilverMarketModel, SilverPriceForecast)
+```
+
+Trend: Indicates the long-term momentum of silver, helping to identify if we are in a multi-year growth phase.
+
+Weekly: Shows the "day-of-the-week" effect, which can be useful for understanding market psychology during the trading week.
+
+Yearly: This highlights the seasonal demand for silver, which can be influenced by industrial manufacturing cycles.
+
+# Section 5: Interactive Analysis
+To make the findings more accessible for a modern audience, I have included an interactive chart. You can zoom in on specific price spikes to see how the model adjusted its trend.
+```{r interactive_analysis, echo=FALSE, message=FALSE, warning=FALSE}
+# Section 5: Interactive Analysis
+# We use dygraphs directly to avoid any Prophet version errors
+library(dygraphs)
+library(zoo)
+
+# Prepare the data: select the date (ds), prediction (yhat), and bounds
+interactive_data <- SilverPriceForecast[, c("ds", "yhat", "yhat_lower", "yhat_upper")]
+
+# Create a time series object
+interactive_ts <- zoo(interactive_data[, -1], order.by = interactive_data$ds)
+
+# Generate the plot
+dygraph(interactive_ts, main = "Interactive Silver Price Forecast") %>%
+  dySeries(c("yhat_lower", "yhat", "yhat_upper"), label = "Predicted Price") %>%
+  dyRangeSelector() %>%
+  dyOptions(colors = "steelblue")
+```
+# Section 6: Recent Market Analysis - The "Sell-Off" Phase
+## 6.1 Zoomed Forecast (90-Day Outlook)
+While the long-term trend for silver has historically been positive, the most recent quarter has seen a significant shift in momentum. In this section, we "zoom in" on the last three months of historical data and our prediction for the upcoming 90 days to better understand this recent downward trajectory.
+
+```{r recent_analysis, echo=FALSE, message=FALSE, warning=FALSE}
+# 1. Filter the forecast to show only 3 months back and 3 months forward
+# This helps visualize the recent 'sell-off' more clearly
+current_date <- max(SilverPriceData$ds)
+three_months_ago <- current_date - 90
+three_months_ahead <- current_date + 90
+
+# We subset the forecast dataframe for plotting
+recent_forecast <- SilverPriceForecast %>%
+  filter(ds >= three_months_ago & ds <= three_months_ahead)
+
+# 2. Create the 'Zoomed' Plot
+ggplot(recent_forecast, aes(x = ds, y = yhat)) +
+  geom_line(color = "#2c3e50", size = 1) +
+  geom_ribbon(aes(ymin = yhat_lower, ymax = yhat_upper), fill = "steelblue", alpha = 0.2) +
+  geom_point(data = filter(SilverPriceData, ds >= three_months_ago), 
+             aes(x = ds, y = y, color = "Actual Price"), size = 1.5) +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual Price" = "black")) +
+  labs(title = "Detailed 6-Month View: Recent Sell-off & Near-Term Outlook",
+       subtitle = "Visualizing the break in upward momentum",
+       x = "Date",
+       y = "SLV Price (USD)",
+       color = "") +
+  theme(legend.position = "bottom")
+```
+
+## 6.2 The results from the last 24 hours following Fed meeting
+Following the Federal Reserve meeting on March 18, 2026, silver experienced a sharp intraday sell-off. The Fed's decision to maintain a "higher for longer" interest rate stance, coupled with a surge in oil prices due to regional tensions, strengthened the US Dollar and increased bond yields—both of which are traditional headwinds for non-yielding assets like silver.
+
+```{r last_24_hours, echo=FALSE, message=FALSE, warning=FALSE}
+# Isolate the last two trading days to show the immediate impact
+last_48_hours <- tail(SilverPriceData, 2)
+
+knitr::kable(last_48_hours, col.names = c("Trading Date", "Closing Price (USD)"),
+             caption = "Immediate Price Reaction Post-Fed Meeting")
+```
+
+The drop-off over the last 24 hours is a classic "risk-off" reaction. As the Fed meeting yesterday signaled persistent inflationary pressures, investors rotated out of precious metals into the USD. This sell-off was further exacerbated by a spike in oil prices linked to the Iran conflict, which typically leads to margin calls in other commodity sectors, forcing technical selling in silver.
+
+# Section 7: Conclusion
+This report demonstrates that while Meta’s Prophet is highly effective at identifying seasonal cycles and long-term growth phases, it cannot account for "Black Swan" events or sudden shifts in Fed policy. The recent sell-off highlights the importance of combining algorithmic forecasting with fundamental macroeconomic analysis. For a professional portfolio, silver remains a vital hedge, but the current 24-hour trajectory suggests that caution is required as the market adjusts to higher interest rate expectations.
